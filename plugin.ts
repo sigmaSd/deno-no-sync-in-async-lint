@@ -127,7 +127,7 @@ function analyzeTypeScriptFile(filePath: string, visited = new Set<string>()) {
 const plugin: Deno.lint.Plugin = {
   name: "sync-checker",
   rules: {
-    "no-async-sync": {
+    "no-sync-in-async": {
       create(context) {
         let analyzed = false;
 
