@@ -124,7 +124,7 @@ function analyzeTypeScriptFile(filePath: string, visited = new Set<string>()) {
   }
 }
 
-export default {
+const plugin: Deno.lint.Plugin = {
   name: "sync-checker",
   rules: {
     "no-async-sync": {
@@ -225,4 +225,6 @@ export default {
       },
     },
   },
-} satisfies Deno.lint.Plugin;
+};
+
+export default plugin;
