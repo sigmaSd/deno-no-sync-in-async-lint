@@ -25,7 +25,8 @@ function normalizeImportPath(
       `file://${ensureAbsolute(currentDir)}/`,
     );
     const resolved = decodeURIComponent(url.pathname);
-    return resolved.endsWith(".ts") ? resolved : `${resolved}.ts`;
+    // Only append .ts if the path doesn't already have an extension
+    return /\.[^/.]+$/.test(resolved) ? resolved : `${resolved}.ts`;
   } catch (error) {
     console.error(
       `Error normalizing path ${importSpecifier} relative to ${currentDir}:`,
