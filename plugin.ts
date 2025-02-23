@@ -130,41 +130,37 @@ export default {
       create(context) {
         let analyzed = false;
 
-        function isBlockingFunction(
-          name: string,
+        // Helper function to find the actual blocking call node
+        function findBlockingNodes(
+          node: ts.Node,
           visited = new Set<string>(),
-        ): boolean {
-          if (visited.has(name)) return false;
-          visited.add(name);
+        ): ts.Node[] {
+          const blockingNodes: ts.Node[] = [];
 
-          if (globalState.blockingFunctions.has(name)) {
-            return true;
-          }
-
-          // Check imported functions
-          const importInfo = globalState.importMap.get(name);
-          if (importInfo) {
-            const sourceBlockingFuncs = globalState.analyzedFiles.get(
-              importInfo.source,
-            );
-            if (sourceBlockingFuncs?.has(importInfo.name)) {
-              globalState.blockingFunctions.add(name);
-              return true;
-            }
-          }
-
-          // Check function calls
-          const calls = globalState.functionCalls.get(name);
-          if (calls) {
-            for (const callee of calls) {
-              if (!visited.has(callee) && isBlockingFunction(callee, visited)) {
-                globalState.blockingFunctions.add(name);
-                return true;
+          function visit(node: ts.Node) {
+            if (ts.isCallExpression(node)) {
+              const expr = node.expression;
+              // Check for direct Deno.*Sync calls
+              if (
+                ts.isPropertyAccessExpression(expr) &&
+                ts.isIdentifier(expr.expression) &&
+                expr.expression.text === "Deno" &&
+                ts.isIdentifier(expr.name) &&
+                expr.name.text.endsWith("Sync")
+              ) {
+                blockingNodes.push(node);
+              } else if (ts.isIdentifier(expr)) {
+                const calledName = expr.text;
+                if (globalState.blockingFunctions.has(calledName)) {
+                  blockingNodes.push(node);
+                }
               }
             }
+            node.forEachChild((child) => visit(child));
           }
 
-          return false;
+          visit(node);
+          return blockingNodes;
         }
 
         return {
@@ -179,11 +175,17 @@ export default {
             if (node.id?.name) {
               const funcName = node.id.name;
               if (isBlockingFunction(funcName)) {
-                context.report({
-                  node,
-                  message:
-                    `Async function '${funcName}' contains blocking operations`,
-                });
+                // Find all blocking nodes within the function
+                const blockingNodes = findBlockingNodes(node);
+
+                // Report each blocking operation individually
+                for (const blockingNode of blockingNodes) {
+                  context.report({
+                    node: blockingNode,
+                    message:
+                      `Blocking operation found in async function '${funcName}'`,
+                  });
+                }
               }
             }
           },
