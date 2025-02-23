@@ -44,17 +44,21 @@ export class TypeScriptAnalyzer {
     this.state.functionCalls.get(caller)?.add(callee);
   }
 
-  private markAsBlocking(funcName: string) {
+  private markAsBlocking(funcName: string, visited = new Set<string>()) {
+    if (visited.has(funcName)) {
+      return; // Skip if we've already visited this function to prevent infinite recursion
+    }
+
+    visited.add(funcName);
     this.state.blockingFunctions.add(funcName);
 
     // Mark all functions that call this function as blocking
     for (const [caller, callees] of this.state.functionCalls.entries()) {
       if (callees.has(funcName)) {
-        this.markAsBlocking(caller);
+        this.markAsBlocking(caller, visited);
       }
     }
   }
-
   private async resolveJsrUrl(jsrSpecifier: string): Promise<string> {
     try {
       // Create a temporary file to use with deno info
