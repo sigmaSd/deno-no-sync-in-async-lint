@@ -240,6 +240,13 @@ export class TypeScriptAnalyzer {
         if (ts.isImportDeclaration(node)) {
           const source = node.moduleSpecifier.getText().replace(/['"]/g, "");
 
+          if (source.startsWith("npm:")) {
+            console.warn(
+              `Warning: npm: specifiers are not yet supported for analysis: ${source}`,
+            );
+            return;
+          }
+
           if (source.startsWith("jsr:") || source.startsWith("npm:")) {
             // Handle remote imports
             importPromises.push(
@@ -397,6 +404,12 @@ export class TypeScriptAnalyzer {
       const analyzeImports = (node: ts.Node) => {
         if (ts.isImportDeclaration(node)) {
           const source = node.moduleSpecifier.getText().replace(/['"]/g, "");
+          if (source.startsWith("npm:")) {
+            console.warn(
+              `Warning: npm: specifiers are not yet supported for analysis: ${source}`,
+            );
+            return;
+          }
 
           if (source.startsWith("jsr:") || source.startsWith("npm:")) {
             const blockingFuncs = this.fetchAndAnalyzeRemoteModuleSync(source);
