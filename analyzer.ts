@@ -7,12 +7,19 @@ interface RemoteModuleInfo {
   blockingFunctions: Set<string>;
 }
 
+interface FunctionLocation {
+  file: string;
+  line: number;
+  column: number;
+}
+
 export interface AnalyzerState {
   blockingFunctions: Set<string>;
   importMap: Map<string, { source: string; name: string }>;
   analyzedFiles: Map<string, Set<string>>;
   functionCalls: Map<string, Set<string>>;
   remoteModules: Map<string, RemoteModuleInfo>;
+  functionLocations: Map<string, FunctionLocation>;
 }
 
 export class TypeScriptAnalyzer {
@@ -22,6 +29,7 @@ export class TypeScriptAnalyzer {
     analyzedFiles: new Map<string, Set<string>>(),
     functionCalls: new Map<string, Set<string>>(),
     remoteModules: new Map(),
+    functionLocations: new Map<string, FunctionLocation>(),
   };
 
   private normalizeImportPath(
@@ -46,7 +54,7 @@ export class TypeScriptAnalyzer {
 
   private markAsBlocking(funcName: string, visited = new Set<string>()) {
     if (visited.has(funcName)) {
-      return; // Skip if we've already visited this function to prevent infinite recursion
+      return;
     }
 
     visited.add(funcName);
@@ -56,29 +64,31 @@ export class TypeScriptAnalyzer {
     for (const [caller, callees] of this.state.functionCalls.entries()) {
       if (callees.has(funcName)) {
         this.markAsBlocking(caller, visited);
+        // If the caller doesn't have a location, inherit from the callee
+        if (!this.state.functionLocations.has(caller)) {
+          const location = this.state.functionLocations.get(funcName);
+          if (location) {
+            this.state.functionLocations.set(caller, location);
+          }
+        }
       }
     }
   }
   private async resolveJsrUrl(jsrSpecifier: string): Promise<string> {
     try {
-      // Create a temporary file to use with deno info
       const tempFile = await Deno.makeTempFile({ suffix: ".ts" });
       await Deno.writeTextFile(
         tempFile,
         `import {} from "${jsrSpecifier}";`,
       );
 
-      // Run deno info and capture the output
       const command = new Deno.Command("deno", {
         args: ["info", tempFile, "--json"],
       });
       const output = await command.output();
       await Deno.remove(tempFile);
 
-      // Parse the JSON output
       const info = JSON.parse(new TextDecoder().decode(output.stdout));
-
-      // Find the URL corresponding to the JSR module
       const url = info.redirects[jsrSpecifier];
       if (url) {
         return url;
@@ -96,7 +106,6 @@ export class TypeScriptAnalyzer {
     }
 
     try {
-      // Resolve JSR URLs to their actual URLs
       const actualUrl = url.startsWith("jsr:")
         ? await this.resolveJsrUrl(url)
         : url;
@@ -141,6 +150,14 @@ export class TypeScriptAnalyzer {
       if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node)) {
         if (node.name && ts.isIdentifier(node.name)) {
           currentFunction = node.name.text;
+          const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+            node.getStart(),
+          );
+          this.state.functionLocations.set(node.name.text, {
+            file: filePath,
+            line: line + 1,
+            column: character + 1,
+          });
         }
       } else if (
         ts.isVariableDeclaration(node) &&
@@ -150,8 +167,15 @@ export class TypeScriptAnalyzer {
           ts.isArrowFunction(node.initializer))
       ) {
         currentFunction = node.name.text;
+        const { line, character } = sourceFile.getLineAndCharacterOfPosition(
+          node.getStart(),
+        );
+        this.state.functionLocations.set(node.name.text, {
+          file: filePath,
+          line: line + 1,
+          column: character + 1,
+        });
       }
-
       if (currentFunction) {
         if (ts.isCallExpression(node)) {
           const expr = node.expression;
@@ -233,6 +257,11 @@ export class TypeScriptAnalyzer {
                         });
                         if (blockingFuncs.has(importedName)) {
                           this.markAsBlocking(localName);
+                          this.state.functionLocations.set(localName, {
+                            file: source,
+                            line: 1,
+                            column: 1,
+                          });
                         }
                       },
                     );
@@ -246,7 +275,6 @@ export class TypeScriptAnalyzer {
           }
         }
       };
-
       ts.forEachChild(sourceFile, analyzeImports);
 
       // Wait for all imports to be analyzed
@@ -288,24 +316,19 @@ export class TypeScriptAnalyzer {
 
   private resolveJsrUrlSync(jsrSpecifier: string): string {
     try {
-      // Create a temporary file to use with deno info
       const tempFile = Deno.makeTempFileSync({ suffix: ".ts" });
       Deno.writeTextFileSync(
         tempFile,
         `import {} from "${jsrSpecifier}";`,
       );
 
-      // Run deno info and capture the output
       const command = new Deno.Command("deno", {
         args: ["info", tempFile, "--json"],
       });
       const output = command.outputSync();
       Deno.removeSync(tempFile);
 
-      // Parse the JSON output
       const info = JSON.parse(new TextDecoder().decode(output.stdout));
-
-      // Find the URL corresponding to the JSR module
       const url = info.redirects[jsrSpecifier];
       if (url) {
         return url;
@@ -323,7 +346,6 @@ export class TypeScriptAnalyzer {
     }
 
     try {
-      // Resolve JSR URLs to their actual URLs
       const actualUrl = url.startsWith("jsr:")
         ? this.resolveJsrUrlSync(url)
         : url;
@@ -354,7 +376,6 @@ export class TypeScriptAnalyzer {
       return new Set();
     }
   }
-
   analyzeFileSync(filePath: string, visited = new Set<string>()): Set<string> {
     const absolutePath = path.resolve(filePath);
 
@@ -373,13 +394,11 @@ export class TypeScriptAnalyzer {
         true,
       );
 
-      // First pass: collect and analyze imports
       const analyzeImports = (node: ts.Node) => {
         if (ts.isImportDeclaration(node)) {
           const source = node.moduleSpecifier.getText().replace(/['"]/g, "");
 
           if (source.startsWith("jsr:") || source.startsWith("npm:")) {
-            // Handle remote imports synchronously
             const blockingFuncs = this.fetchAndAnalyzeRemoteModuleSync(source);
             if (node.importClause?.namedBindings) {
               if (ts.isNamedImports(node.importClause.namedBindings)) {
@@ -393,6 +412,11 @@ export class TypeScriptAnalyzer {
                   });
                   if (blockingFuncs.has(importedName)) {
                     this.markAsBlocking(localName);
+                    this.state.functionLocations.set(localName, {
+                      file: source,
+                      line: 1,
+                      column: 1,
+                    });
                   }
                 });
               }
@@ -429,36 +453,24 @@ if (import.meta.main) {
   }
 
   analyzer.analyzeFileSync(filePath);
+  const state = analyzer.getState();
+  const blockingFunctions = [...state.blockingFunctions].sort();
 
-  console.log("\nAnalysis Results:");
-  console.log("----------------");
-  console.log(
-    "\nBlocking functions:",
-    [
-      ...analyzer.getState().blockingFunctions,
-    ].sort(),
-  );
-
-  console.log("\nImport map:");
-  const sortedImports = [...analyzer.getState().importMap.entries()]
-    .sort(([a], [b]) => a.localeCompare(b));
-  for (const [key, value] of sortedImports) {
-    console.log(`  ${key} -> ${value.source} (${value.name})`);
-  }
-
-  console.log("\nFunction calls:");
-  const sortedCalls = [...analyzer.getState().functionCalls.entries()]
-    .sort(([a], [b]) => a.localeCompare(b));
-  for (const [func, calls] of sortedCalls) {
-    console.log(`  ${func} calls: [${[...calls].sort().join(", ")}]`);
-  }
-
-  console.log("\nRemote modules analyzed:");
-  for (const [url, info] of analyzer.getState().remoteModules) {
+  if (blockingFunctions.length > 0) {
     console.log(
-      `  ${url} - Blocking functions: [${
-        [...info.blockingFunctions].sort().join(", ")
-      }]`,
+      "\nWarning: Found blocking functions in the following locations:",
     );
+    blockingFunctions.forEach((func) => {
+      const location = state.functionLocations.get(func);
+      if (location) {
+        console.log(
+          `  - ${func} (in ${location.file}:${location.line}:${location.column})`,
+        );
+      } else {
+        console.log(`  - ${func} (in unknown location)`);
+      }
+    });
+  } else {
+    console.log("\nNo blocking functions found.");
   }
 }
