@@ -1,5 +1,4 @@
 // plugins/plugin.ts
-import { Analyzer } from "./analyzer.ts";
 
 const analyzer = new Analyzer();
 

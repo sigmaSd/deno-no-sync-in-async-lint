@@ -1,6 +1,6 @@
-
-import * as ts from "npm:typescript";
-import parser from "npm:@typescript-eslint/parser";
+// deno-lint-ignore-file no-explicit-any
+import ts from "npm:typescript@5.7.2";
+import parser from "npm:@typescript-eslint/parser@8.24.1";
 
 const globalState = {
   blockingFunctions: new Set<string>(),
@@ -10,27 +10,39 @@ const globalState = {
   functionCalls: new Map<string, Set<string>>(),
 };
 
-function normalizeImportPath(importSpecifier: string, currentFile: string): string {
+function normalizeImportPath(
+  importSpecifier: string,
+  currentFile: string,
+): string {
   const ensureAbsolute = (path: string) =>
-    path.startsWith('/') ? path : `/${path}`;
+    path.startsWith("/") ? path : `/${path}`;
 
-  if (!importSpecifier.startsWith('.')) {
+  if (!importSpecifier.startsWith(".")) {
     return importSpecifier;
   }
 
-  const currentDir = currentFile.replace(/\/[^/]+$/, '');
+  const currentDir = currentFile.replace(/\/[^/]+$/, "");
 
   try {
-    const url = new URL(importSpecifier, `file://${ensureAbsolute(currentDir)}/`);
+    const url = new URL(
+      importSpecifier,
+      `file://${ensureAbsolute(currentDir)}/`,
+    );
     const resolved = decodeURIComponent(url.pathname);
-    return resolved.endsWith('.ts') ? resolved : `${resolved}.ts`;
+    return resolved.endsWith(".ts") ? resolved : `${resolved}.ts`;
   } catch (error) {
-    console.error(`Error normalizing path ${importSpecifier} relative to ${currentDir}:`, error);
+    console.error(
+      `Error normalizing path ${importSpecifier} relative to ${currentDir}:`,
+      error,
+    );
     return importSpecifier;
   }
 }
 
-function resolveImportPath(importSpecifier: string, currentFile: string): string {
+function resolveImportPath(
+  importSpecifier: string,
+  currentFile: string,
+): string {
   console.log(`\nResolving import:
   From file: ${currentFile}
   Import specifier: ${importSpecifier}
@@ -43,18 +55,20 @@ function resolveImportPath(importSpecifier: string, currentFile: string): string
     try {
       Deno.statSync(resolved);
       console.log(`File exists: ${resolved}`);
-    } catch (error) {
+    } catch {
       console.warn(`Warning: Resolved file does not exist: ${resolved}`);
     }
 
     return resolved;
   } catch (error) {
-    console.error(`Error resolving import:`, error);
+    console.error("Error resolving import:", error);
     return importSpecifier;
   }
 }
 
-function findBlockingFunctionsInTypescript(sourceFile: ts.SourceFile): Set<string> {
+function findBlockingFunctionsInTypescript(
+  sourceFile: ts.SourceFile,
+): Set<string> {
   const blockingFuncs = new Set<string>();
   let currentFunction: string | undefined;
 
@@ -83,7 +97,9 @@ function findBlockingFunctionsInTypescript(sourceFile: ts.SourceFile): Set<strin
       } else if (ts.isIdentifier(expr) && currentFunction) {
         const calledName = expr.text;
         globalState.functionCalls.get(currentFunction)?.add(calledName);
-        console.log(`Recording function call: ${currentFunction} calls ${calledName}`);
+        console.log(
+          `Recording function call: ${currentFunction} calls ${calledName}`,
+        );
       }
     }
 
@@ -109,7 +125,9 @@ function propagateBlockingStatus(): void {
         for (const callee of callees) {
           // Direct blocking check
           if (globalState.blockingFunctions.has(callee)) {
-            console.log(`Marking ${caller} as blocking (calls blocking function ${callee})`);
+            console.log(
+              `Marking ${caller} as blocking (calls blocking function ${callee})`,
+            );
             globalState.blockingFunctions.add(caller);
             changed = true;
             break;
@@ -120,10 +138,14 @@ function propagateBlockingStatus(): void {
 
     // Second pass: check imported functions
     for (const [localName, importInfo] of globalState.importMap) {
-      const sourceBlockingFuncs = globalState.analyzedFiles.get(importInfo.source);
+      const sourceBlockingFuncs = globalState.analyzedFiles.get(
+        importInfo.source,
+      );
       if (sourceBlockingFuncs?.has(importInfo.name)) {
         if (!globalState.blockingFunctions.has(localName)) {
-          console.log(`Marking imported function ${localName} as blocking (from ${importInfo.source})`);
+          console.log(
+            `Marking imported function ${localName} as blocking (from ${importInfo.source})`,
+          );
           globalState.blockingFunctions.add(localName);
           changed = true;
         }
@@ -136,9 +158,13 @@ function propagateBlockingStatus(): void {
         for (const callee of callees) {
           const importInfo = globalState.importMap.get(callee);
           if (importInfo) {
-            const sourceBlockingFuncs = globalState.analyzedFiles.get(importInfo.source);
+            const sourceBlockingFuncs = globalState.analyzedFiles.get(
+              importInfo.source,
+            );
             if (sourceBlockingFuncs?.has(importInfo.name)) {
-              console.log(`Marking ${caller} as blocking (calls imported blocking function ${callee})`);
+              console.log(
+                `Marking ${caller} as blocking (calls imported blocking function ${callee})`,
+              );
               globalState.blockingFunctions.add(caller);
               changed = true;
               break;
@@ -150,8 +176,13 @@ function propagateBlockingStatus(): void {
   }
 }
 
-async function analyzeFileAndImports(filePath: string, visited = new Set<string>()): Promise<Set<string>> {
-  const absolutePath = filePath.startsWith('/') ? filePath : `${Deno.cwd()}/${filePath}`;
+async function analyzeFileAndImports(
+  filePath: string,
+  visited = new Set<string>(),
+): Promise<Set<string>> {
+  const absolutePath = filePath.startsWith("/")
+    ? filePath
+    : `${Deno.cwd()}/${filePath}`;
   const normalizedPath = normalizeImportPath(absolutePath, Deno.cwd());
 
   if (visited.has(normalizedPath)) {
@@ -167,25 +198,26 @@ async function analyzeFileAndImports(filePath: string, visited = new Set<string>
       normalizedPath,
       content,
       ts.ScriptTarget.Latest,
-      true
+      true,
     );
 
     // First collect all imports
     const imports = new Map<string, string>();
-    sourceFile.forEachChild(node => {
+    sourceFile.forEachChild((node) => {
       if (ts.isImportDeclaration(node)) {
-        const source = node.moduleSpecifier.getText().replace(/['"]/g, '');
-        if (source.startsWith('.')) {
+        const source = node.moduleSpecifier.getText().replace(/['"]/g, "");
+        if (source.startsWith(".")) {
           const importPath = resolveImportPath(source, normalizedPath);
 
-          node.importClause?.namedBindings?.forEachChild(specifier => {
+          node.importClause?.namedBindings?.forEachChild((specifier) => {
             if (ts.isImportSpecifier(specifier)) {
               const localName = specifier.name.text;
-              const importedName = (specifier.propertyName || specifier.name).text;
+              const importedName =
+                (specifier.propertyName || specifier.name).text;
               imports.set(localName, importPath);
               globalState.importMap.set(localName, {
                 source: importPath,
-                name: importedName
+                name: importedName,
               });
             }
           });
@@ -216,7 +248,10 @@ async function analyzeFileAndImports(filePath: string, visited = new Set<string>
   }
 }
 
-function isBlockingFunction(name: string, visited = new Set<string>()): boolean {
+function isBlockingFunction(
+  name: string,
+  visited = new Set<string>(),
+): boolean {
   if (visited.has(name)) return false;
   visited.add(name);
 
@@ -231,7 +266,9 @@ function isBlockingFunction(name: string, visited = new Set<string>()): boolean 
       return true;
     }
 
-    const sourceBlockingFuncs = globalState.analyzedFiles.get(importInfo.source);
+    const sourceBlockingFuncs = globalState.analyzedFiles.get(
+      importInfo.source,
+    );
     if (sourceBlockingFuncs?.has(importInfo.name)) {
       globalState.blockingFunctions.add(name);
       return true;
@@ -251,10 +288,9 @@ function isBlockingFunction(name: string, visited = new Set<string>()): boolean 
   return false;
 }
 
-function analyzeDenoSyncCalls(filePath: string): Set<string> {
-  return analyzeFileAndImports(filePath);
+async function analyzeDenoSyncCalls(filePath: string): Promise<Set<string>> {
+  return await analyzeFileAndImports(filePath);
 }
-
 
 const noAsyncSyncRule = {
   meta: {
@@ -266,7 +302,8 @@ const noAsyncSyncRule = {
     },
     schema: [],
   },
-  create(context) {
+  // biome-ignore lint/suspicious/noExplicitAny: <explanation>
+  create(context: any) {
     let analyzed = false;
     let analysisPromise: Promise<void> | null = null;
 
@@ -280,11 +317,14 @@ const noAsyncSyncRule = {
       propagateBlockingStatus();
       analyzed = true;
 
-      console.log("\nAnalysis complete. Blocking functions:", Array.from(globalState.blockingFunctions));
+      console.log(
+        "\nAnalysis complete. Blocking functions:",
+        Array.from(globalState.blockingFunctions),
+      );
     }
 
     return {
-      Program(node) {
+      Program() {
         if (!analyzed && !analysisPromise) {
           analysisPromise = analyzeFile();
         }
@@ -307,34 +347,43 @@ const noAsyncSyncRule = {
               const blockingChain = findBlockingChain(funcName);
               context.report({
                 node,
-                message: `Async function '${funcName}' contains blocking operations through: ${blockingChain.join(" -> ")}`,
+                message:
+                  `Async function '${funcName}' contains blocking operations through: ${
+                    blockingChain.join(" -> ")
+                  }`,
               });
             }
           }
         }
 
         console.log("\nFinal Analysis Summary:");
-        console.log("All blocking functions:", Array.from(globalState.blockingFunctions));
+        console.log(
+          "All blocking functions:",
+          Array.from(globalState.blockingFunctions),
+        );
         console.log(
           "Analyzed files:",
           Object.fromEntries(
             Array.from(globalState.analyzedFiles.entries())
-              .map(([k, v]) => [k, Array.from(v)])
-          )
+              .map(([k, v]) => [k, Array.from(v)]),
+          ),
         );
-      }
+      },
     };
-  }
+  },
 };
 
 // Add this helper function to trace the blocking chain
-function findBlockingChain(funcName: string, visited = new Set<string>()): string[] {
+function findBlockingChain(
+  funcName: string,
+  visited = new Set<string>(),
+): string[] {
   if (visited.has(funcName)) return [];
   visited.add(funcName);
 
   // Check direct Deno.*Sync usage
   const fileEntries = Array.from(globalState.analyzedFiles.entries());
-  for (const [file, funcs] of fileEntries) {
+  for (const [_file, funcs] of fileEntries) {
     if (funcs.has(funcName)) {
       return [funcName];
     }
@@ -343,7 +392,9 @@ function findBlockingChain(funcName: string, visited = new Set<string>()): strin
   // Check imported functions
   const importInfo = globalState.importMap.get(funcName);
   if (importInfo) {
-    const sourceBlockingFuncs = globalState.analyzedFiles.get(importInfo.source);
+    const sourceBlockingFuncs = globalState.analyzedFiles.get(
+      importInfo.source,
+    );
     if (sourceBlockingFuncs?.has(importInfo.name)) {
       return [funcName, importInfo.name];
     }
@@ -379,12 +430,12 @@ export default [
     plugins: {
       custom: {
         rules: {
-          "no-async-sync": noAsyncSyncRule
-        }
-      }
+          "no-async-sync": noAsyncSyncRule,
+        },
+      },
     },
     rules: {
-      "custom/no-async-sync": "error"
-    }
-  }
+      "custom/no-async-sync": "error",
+    },
+  },
 ];
