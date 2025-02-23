@@ -130,37 +130,41 @@ export default {
       create(context) {
         let analyzed = false;
 
-        // Helper function to find the actual blocking call node
-        function findBlockingNodes(
-          node: ts.Node,
+        function isBlockingFunction(
+          name: string,
           visited = new Set<string>(),
-        ): ts.Node[] {
-          const blockingNodes: ts.Node[] = [];
+        ): boolean {
+          if (visited.has(name)) return false;
+          visited.add(name);
 
-          function visit(node: ts.Node) {
-            if (ts.isCallExpression(node)) {
-              const expr = node.expression;
-              // Check for direct Deno.*Sync calls
-              if (
-                ts.isPropertyAccessExpression(expr) &&
-                ts.isIdentifier(expr.expression) &&
-                expr.expression.text === "Deno" &&
-                ts.isIdentifier(expr.name) &&
-                expr.name.text.endsWith("Sync")
-              ) {
-                blockingNodes.push(node);
-              } else if (ts.isIdentifier(expr)) {
-                const calledName = expr.text;
-                if (globalState.blockingFunctions.has(calledName)) {
-                  blockingNodes.push(node);
-                }
-              }
-            }
-            node.forEachChild((child) => visit(child));
+          if (globalState.blockingFunctions.has(name)) {
+            return true;
           }
 
-          visit(node);
-          return blockingNodes;
+          // Check imported functions
+          const importInfo = globalState.importMap.get(name);
+          if (importInfo) {
+            const sourceBlockingFuncs = globalState.analyzedFiles.get(
+              importInfo.source,
+            );
+            if (sourceBlockingFuncs?.has(importInfo.name)) {
+              globalState.blockingFunctions.add(name);
+              return true;
+            }
+          }
+
+          // Check function calls
+          const calls = globalState.functionCalls.get(name);
+          if (calls) {
+            for (const callee of calls) {
+              if (!visited.has(callee) && isBlockingFunction(callee, visited)) {
+                globalState.blockingFunctions.add(name);
+                return true;
+              }
+            }
+          }
+
+          return false;
         }
 
         return {
@@ -171,17 +175,36 @@ export default {
             }
           },
 
-          "FunctionDeclaration[async=true]"(node) {
-            if (node.id?.name) {
-              const funcName = node.id.name;
-              if (isBlockingFunction(funcName)) {
-                // Find all blocking nodes within the function
-                const blockingNodes = findBlockingNodes(node);
+          "CallExpression"(node) {
+            // Check if we're inside an async function
+            // @ts-ignore parent does exist
+            let parent = node.parent;
+            while (parent && parent.type !== "FunctionDeclaration") {
+              parent = parent.parent;
+            }
 
-                // Report each blocking operation individually
-                for (const blockingNode of blockingNodes) {
+            if (parent?.type === "FunctionDeclaration" && parent.async) {
+              const funcName = parent.id?.name;
+              if (funcName && isBlockingFunction(funcName)) {
+                // Check if this call is a blocking operation
+                if (
+                  node.callee.type === "MemberExpression" &&
+                  node.callee.object.type === "Identifier" &&
+                  node.callee.object.name === "Deno" &&
+                  node.callee.property.type === "Identifier" &&
+                  node.callee.property.name.endsWith("Sync")
+                ) {
                   context.report({
-                    node: blockingNode,
+                    node,
+                    message:
+                      `Blocking operation found in async function '${funcName}'`,
+                  });
+                } else if (
+                  node.callee.type === "Identifier" &&
+                  globalState.blockingFunctions.has(node.callee.name)
+                ) {
+                  context.report({
+                    node,
                     message:
                       `Blocking operation found in async function '${funcName}'`,
                   });
