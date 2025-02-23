@@ -1,4 +1,4 @@
-import { blocking_b } from "./b.ts";
+import { blocking_b, wrap_blocking_c } from "./b.ts";
 
 export async function blocking() {
   Deno.readTextFileSync("");
@@ -11,6 +11,10 @@ export async function blocking2() {
 
 export async function blocking_wrap_b() {
   await blocking_b();
+}
+
+export async function blocking_wrap_b_c() {
+  await wrap_blocking_c();
 }
 
 export async function not_blocking() {

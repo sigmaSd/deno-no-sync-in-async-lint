@@ -1,168 +1,264 @@
-
-// eslint.config.ts
 import * as ts from "npm:typescript";
-import { resolve, dirname } from "node:path";
+import parser from "npm:@typescript-eslint/parser";
 
 const globalState = {
   blockingFunctions: new Set<string>(),
-  checkedFiles: new Set<string>(),
+  importMap: new Map<string, { source: string; name: string }>(),
+  analyzedFiles: new Map<string, Set<string>>(),
+  analyzedPaths: new Set<string>(),
 };
 
-function createProgram(mainFile: string) {
-  // Find all related files
-  const files = new Set<string>();
-  const host = ts.createCompilerHost({});
+function resolveImportPath(importSpecifier: string, currentFile: string): string {
+  const dir = currentFile.replace(/\/[^/]+$/, '');
+  const resolved = importSpecifier.startsWith('.')
+    ? `${dir}/${importSpecifier.replace(/^\.\//, '')}`
+    : importSpecifier;
+  const result = resolved.endsWith('.ts') ? resolved : `${resolved}.ts`;
+  console.log(`Resolved import path: ${importSpecifier} -> ${result}`);
+  return result;
+}
 
-  function addFile(fileName: string) {
-    if (files.has(fileName)) return;
-    files.add(fileName);
+function findBlockingFunctionsInTypescript(sourceFile: ts.SourceFile): Set<string> {
+  const blockingFuncs = new Set<string>();
+  let currentFunction: string | undefined;
 
-    const sourceFile = ts.createSourceFile(
-      fileName,
-      ts.sys.readFile(fileName) || "",
-      ts.ScriptTarget.ESNext
-    );
+  function visit(node: ts.Node) {
+    // Track current function
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      currentFunction = node.name.text;
+    }
 
-    // Find imports
-    ts.forEachChild(sourceFile, node => {
-      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-        const importPath = resolve(dirname(fileName), node.moduleSpecifier.text);
-        addFile(importPath + ".ts"); // Assuming .ts extension
+    // Check for Deno.*Sync calls
+    if (ts.isCallExpression(node)) {
+      const expr = node.expression;
+      if (
+        ts.isPropertyAccessExpression(expr) &&
+        ts.isIdentifier(expr.expression) &&
+        expr.expression.text === "Deno" &&
+        ts.isIdentifier(expr.name) &&
+        expr.name.text.endsWith("Sync")
+      ) {
+        if (currentFunction) {
+          console.log(`Found Deno.*Sync in function: ${currentFunction}`);
+          blockingFuncs.add(currentFunction);
+        }
       }
-    });
+    }
+
+    // Recursively visit all children
+    node.forEachChild(visit);
+
+    // Reset current function when leaving its scope
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      currentFunction = undefined;
+    }
   }
 
-  addFile(mainFile);
+  visit(sourceFile);
 
-  return ts.createProgram(Array.from(files), {
-    target: ts.ScriptTarget.ESNext,
-    module: ts.ModuleKind.ESNext,
-    allowJs: true,
-  });
+  if (blockingFuncs.size > 0) {
+    console.log(`Found blocking functions:`, Array.from(blockingFuncs));
+  }
+
+  return blockingFuncs;
 }
+function analyzeDenoSyncCalls(filePath: string): Set<string> {
+  console.log(`\nAnalyzing file: ${filePath}`);
+
+  if (globalState.analyzedPaths.has(filePath)) {
+    const cached = globalState.analyzedFiles.get(filePath);
+    console.log(`Using cached results for ${filePath}:`, Array.from(cached || []));
+    return cached || new Set();
+  }
+
+  try {
+    console.log(`Reading file: ${filePath}`);
+    const content = Deno.readTextFileSync(filePath);
+    globalState.analyzedPaths.add(filePath);
+
+    console.log(`Creating source file for: ${filePath}`);
+    const sourceFile = ts.createSourceFile(
+      filePath,
+      content,
+      ts.ScriptTarget.Latest,
+      true
+    );
+
+    const blockingFuncs = findBlockingFunctionsInTypescript(sourceFile);
+
+    // Add to global state
+    for (const func of blockingFuncs) {
+      console.log(`Adding ${func} to global blocking functions`);
+      globalState.blockingFunctions.add(func);
+    }
+
+    globalState.analyzedFiles.set(filePath, blockingFuncs);
+    console.log(`Analysis complete. Found:`, Array.from(blockingFuncs));
+
+    return blockingFuncs;
+  } catch (error) {
+    console.error(`Error analyzing ${filePath}:`, error);
+    return new Set();
+  }
+}
+
+function isBlockingFunction(name: string): boolean {
+  // Direct check
+  if (globalState.blockingFunctions.has(name)) {
+    console.log(`${name} is directly blocking`);
+    return true;
+  }
+
+  // Check imported function
+  const importInfo = globalState.importMap.get(name);
+  if (importInfo) {
+    console.log(`${name} is imported from ${importInfo.source} as ${importInfo.name}`);
+
+    // Check if the imported function is blocking
+    const sourceBlockingFuncs = globalState.analyzedFiles.get(importInfo.source);
+    if (sourceBlockingFuncs?.has(importInfo.name)) {
+      console.log(`${name} is blocking (imported function ${importInfo.name} is blocking)`);
+      // Add to global blocking functions for future checks
+      globalState.blockingFunctions.add(name);
+      return true;
+    }
+
+    // Check if the original name is in global blocking functions
+    if (globalState.blockingFunctions.has(importInfo.name)) {
+      console.log(`${name} is blocking (original name ${importInfo.name} is blocking)`);
+      globalState.blockingFunctions.add(name);
+      return true;
+    }
+  }
+
+  return false;
+}
+
 
 export default [
   {
     files: ["**/*.{js,mjs,cjs,ts}"],
     ignores: ["**/node_modules/**"],
+    languageOptions: {
+      parser,
+      parserOptions: {
+        ecmaVersion: 2022,
+        sourceType: "module",
+      },
+    },
     plugins: {
-      custom: {
-        rules: {
-          "no-async-sync": {
-            meta: {
-              type: "suggestion",
-            },
-            create(context) {
-              if (globalState.checkedFiles.has(context.filename)) {
-                return {};
-              }
+          custom: {
+            rules: {
+              "no-async-sync": {
+                meta: {
+                  type: "suggestion",
+                },
+                create(context) {
+                  const currentFileBlockingFuncs = new Set<string>();
 
-              console.log("Analyzing file:", context.filename);
+                  return {
+                    Program(node) {
+                      currentFileBlockingFuncs.clear();
+                      console.log("\nAnalyzing file:", context.filename);
+                    },
 
-              // Create TypeScript program with all related files
-              const program = createProgram(context.filename);
-              const typeChecker = program.getTypeChecker();
+                    ImportDeclaration(node) {
+                      const source = node.source.value;
+                      const importPath = resolveImportPath(source, context.filename);
+                      console.log(`Processing import from ${source} (${importPath})`);
 
-              // Analyze all source files
-              for (const sourceFile of program.getSourceFiles()) {
-                if (!sourceFile.isDeclarationFile) {
-                  console.log("Checking file:", sourceFile.fileName);
-                  analyzeSourceFile(sourceFile);
-                }
-              }
-
-              function analyzeSourceFile(sourceFile: ts.SourceFile) {
-                function isDenoSyncCall(node: ts.CallExpression): boolean {
-                  if (ts.isPropertyAccessExpression(node.expression)) {
-                    const left = node.expression.expression;
-                    const right = node.expression.name;
-                    return (
-                      ts.isIdentifier(left) &&
-                      left.text === "Deno" &&
-                      right.text.endsWith("Sync")
-                    );
-                  }
-                  return false;
-                }
-
-                function findBlockingCalls(node: ts.Node) {
-                  if (ts.isCallExpression(node)) {
-                    // Check for Deno.*Sync calls
-                    if (isDenoSyncCall(node)) {
-                      let parent = node.parent;
-                      while (parent && !ts.isFunctionDeclaration(parent)) {
-                        parent = parent.parent;
-                      }
-                      if (parent && ts.isFunctionDeclaration(parent) && parent.name) {
-                        const symbol = typeChecker.getSymbolAtLocation(parent.name);
-                        if (symbol) {
-                          const fullName = typeChecker.getFullyQualifiedName(symbol);
-                          console.log(`Found Deno.*Sync in: ${fullName}`);
-                          globalState.blockingFunctions.add(fullName);
+                      for (const specifier of node.specifiers) {
+                        if (specifier.type === "ImportSpecifier") {
+                          const localName = specifier.local.name;
+                          const importedName = specifier.imported.name;
+                          globalState.importMap.set(localName, {
+                            source: importPath,
+                            name: importedName
+                          });
+                          console.log(`Imported ${localName} from ${importPath} as ${importedName}`);
                         }
                       }
-                    }
 
-                    // Check for calls to blocking functions
-                    const signature = typeChecker.getResolvedSignature(node);
-                    if (signature) {
-                      const declaration = signature.declaration;
-                      if (declaration && ts.isFunctionDeclaration(declaration)) {
-                        const symbol = declaration.name &&
-                          typeChecker.getSymbolAtLocation(declaration.name);
-                        if (symbol) {
-                          const fullName = typeChecker.getFullyQualifiedName(symbol);
-                          if (globalState.blockingFunctions.has(fullName)) {
-                            let parent = node.parent;
-                            while (parent && !ts.isFunctionDeclaration(parent)) {
-                              parent = parent.parent;
-                            }
-                            if (parent && ts.isFunctionDeclaration(parent) && parent.name) {
-                              const parentSymbol = typeChecker.getSymbolAtLocation(parent.name);
-                              if (parentSymbol) {
-                                const parentName = typeChecker.getFullyQualifiedName(parentSymbol);
-                                console.log(`Function ${parentName} calls blocking: ${fullName}`);
-                                globalState.blockingFunctions.add(parentName);
-                              }
-                            }
+                      const blockingFuncs = analyzeDenoSyncCalls(importPath);
+                      if (blockingFuncs.size > 0) {
+                        globalState.analyzedFiles.set(importPath, blockingFuncs);
+                        console.log(`Found blocking functions in ${importPath}:`, Array.from(blockingFuncs));
+                      }
+                    },
+
+                    CallExpression(node) {
+                      // Check for direct Deno.*Sync calls
+                      if (
+                        node.callee?.type === "MemberExpression" &&
+                        node.callee.object?.name === "Deno" &&
+                        node.callee.property?.name?.endsWith("Sync")
+                      ) {
+                        let current = node;
+                        while (current && current.type !== "FunctionDeclaration") {
+                          current = current.parent;
+                        }
+                        if (current?.id?.name) {
+                          const funcName = current.id.name;
+                          console.log(`Found Deno.*Sync in: ${funcName}`);
+                          currentFileBlockingFuncs.add(funcName);
+                          globalState.blockingFunctions.add(funcName);
+                        }
+                      }
+
+                      // Check for calls to blocking functions
+                      if (node.callee?.type === "Identifier") {
+                        const calledName = node.callee.name;
+                        if (isBlockingFunction(calledName)) {
+                          let current = node;
+                          while (current && current.type !== "FunctionDeclaration") {
+                            current = current.parent;
+                          }
+                          if (current?.id?.name) {
+                            const funcName = current.id.name;
+                            console.log(`Function ${funcName} calls blocking function: ${calledName}`);
+                            currentFileBlockingFuncs.add(funcName);
+                            globalState.blockingFunctions.add(funcName);
                           }
                         }
                       }
+                    },
+
+                    FunctionDeclaration(node) {
+                      if (node.async && node.id?.name) {
+                        const funcName = node.id.name;
+                        if (isBlockingFunction(funcName)) {
+                          console.log(`Reporting blocking async function: ${funcName}`);
+                          context.report({
+                            node,
+                            message: "Async function contains blocking operations",
+                          });
+                        }
+                      }
+                    },
+
+                    "Program:exit"() {
+                      console.log("\nSummary:");
+                      console.log("Current file blocking functions:", Array.from(currentFileBlockingFuncs));
+                      console.log("All blocking functions:", Array.from(globalState.blockingFunctions));
+                      console.log("Analyzed files:",
+                        Object.fromEntries(
+                          Array.from(globalState.analyzedFiles.entries())
+                            .map(([k, v]) => [k, Array.from(v)])
+                        )
+                      );
+                      console.log("Import map:",
+                        Object.fromEntries(
+                          Array.from(globalState.importMap.entries())
+                            .map(([k, v]) => [k, v])
+                        )
+                      );
                     }
-                  }
-
-                  ts.forEachChild(node, findBlockingCalls);
+                  };
                 }
-
-                findBlockingCalls(sourceFile);
-                globalState.checkedFiles.add(sourceFile.fileName);
               }
-
-              return {
-                FunctionDeclaration(node) {
-                  if (node.async && node.id?.name) {
-                    const funcName = node.id.name;
-                    // Check both local and fully qualified names
-                    if (globalState.blockingFunctions.has(funcName) ||
-                        Array.from(globalState.blockingFunctions).some(name =>
-                          name.endsWith("." + funcName))) {
-                      context.report({
-                        node,
-                        message: "Async function contains blocking operations",
-                      });
-                    }
-                  }
-                },
-
-                "Program:exit"() {
-                  console.log("Blocking functions:", Array.from(globalState.blockingFunctions));
-                }
-              };
             }
           }
-        }
-      }
-    },
+        },
     rules: {
       "custom/no-async-sync": "error"
     }
