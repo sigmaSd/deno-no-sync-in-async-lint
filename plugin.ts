@@ -199,6 +199,14 @@ export default {
                     node,
                     message:
                       `Blocking operation found in async function '${funcName}'`,
+                    fix(fixer) {
+                      const syncName =
+                        ((node.callee as Deno.lint.MemberExpression)
+                          .property as Deno.lint.PrivateIdentifier).name;
+                      // deno-fmt-ignore
+                      const asyncName = `await Deno.${syncName.replace("Sync", "")}`;
+                      return fixer.replaceText(node.callee, asyncName);
+                    },
                   });
                 } else if (
                   node.callee.type === "Identifier" &&
