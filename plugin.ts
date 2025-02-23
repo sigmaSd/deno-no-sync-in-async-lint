@@ -1,3 +1,4 @@
+// plugin.ts
 import { TypeScriptAnalyzer } from "./analyzer.ts";
 
 const plugin: Deno.lint.Plugin = {
@@ -6,58 +7,72 @@ const plugin: Deno.lint.Plugin = {
     "no-sync-in-async": {
       create(context) {
         const analyzer = new TypeScriptAnalyzer();
-        let analyzed = false;
+        analyzer.analyzeFileSync(context.filename);
+        const blockingFunctions = analyzer.getState().blockingFunctions;
 
         return {
-          Program() {
-            if (!analyzed) {
-              analyzer.analyzeFile(context.filename);
-              analyzed = true;
-            }
-          },
-
-          "CallExpression"(node) {
-            // Check if we're inside an async function
-            // @ts-ignore parent does exist
+          CallExpression(node) {
+            // Find containing async function
+            // @ts-ignore parent exists
             let parent = node.parent;
-            while (parent && parent.type !== "FunctionDeclaration") {
+            let asyncFunction = null;
+            while (parent) {
+              if (
+                parent.type === "FunctionDeclaration" &&
+                (parent as any).async
+              ) {
+                asyncFunction = parent;
+                break;
+              }
               parent = parent.parent;
             }
 
-            if (parent?.type === "FunctionDeclaration" && parent.async) {
-              const funcName = parent.id?.name;
-              if (funcName && analyzer.isBlockingFunction(funcName)) {
-                // Check if this call is a blocking operation
-                if (
-                  node.callee.type === "MemberExpression" &&
-                  node.callee.object.type === "Identifier" &&
-                  node.callee.object.name === "Deno" &&
-                  node.callee.property.type === "Identifier" &&
-                  node.callee.property.name.endsWith("Sync")
-                ) {
-                  context.report({
-                    node,
-                    message:
-                      `Blocking operation found in async function '${funcName}'`,
-                    fix(fixer) {
-                      const syncName =
-                        ((node.callee as Deno.lint.MemberExpression)
-                          .property as Deno.lint.PrivateIdentifier).name;
-                      // deno-fmt-ignore
-                      const asyncName = `await Deno.${syncName.replace("Sync", "")}`;
-                      return fixer.replaceText(node.callee, asyncName);
-                    },
-                  });
-                } else if (
-                  node.callee.type === "Identifier" &&
-                  analyzer.isBlockingFunction(node.callee.name)
-                ) {
-                  context.report({
-                    node,
-                    message:
-                      `Blocking operation found in async function '${funcName}'`,
-                  });
-                }
+            if (!asyncFunction) return;
+
+            const funcName = (asyncFunction as any).id?.name;
+            if (!funcName) return;
+
+            console.log(`Checking call in async function ${funcName}`);
+
+            // Check for Deno.*Sync calls
+            if (
+              node.callee.type === "MemberExpression" &&
+              node.callee.object.type === "Identifier" &&
+              node.callee.object.name === "Deno" &&
+              node.callee.property.type === "Identifier" &&
+              node.callee.property.name.endsWith("Sync")
+            ) {
+              console.log(
+                `Found Deno.${node.callee.property.name} in ${funcName}`,
+              );
+              context.report({
+                node,
+                message:
+                  `Sync operation ${node.callee.property.name} found in async function ${funcName}`,
+                fix(fixer) {
+                  // @ts-ignore property exists
+                  const syncName = node.callee.property.name;
+                  const asyncName = `await Deno.${
+                    syncName.replace("Sync", "")
+                  }`;
+                  return fixer.replaceText(node.callee, asyncName);
+                },
+              });
+              return;
+            }
+
+            // Check for blocking function calls
+            if (node.callee.type === "Identifier") {
+              const calleeName = node.callee.name;
+              if (blockingFunctions.has(calleeName)) {
+                console.log(
+                  `Found blocking call to ${calleeName} in ${funcName}`,
+                );
+                context.report({
+                  node,
+                  message:
+                    `Blocking function '${calleeName}' called in async function '${funcName}'`,
+                });
               }
             }
           },

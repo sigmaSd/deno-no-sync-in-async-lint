@@ -268,6 +268,152 @@ export class TypeScriptAnalyzer {
   getState(): AnalyzerState {
     return this.state;
   }
+
+  private fetchSync(url: string): string {
+    const command = new Deno.Command("curl", {
+      args: ["-s", url],
+    });
+    const output = command.outputSync();
+    if (output.success) {
+      return new TextDecoder().decode(output.stdout);
+    }
+    throw new Error(
+      `Failed to fetch ${url}: ${new TextDecoder().decode(output.stderr)}`,
+    );
+  }
+
+  private resolveJsrUrlSync(jsrSpecifier: string): string {
+    try {
+      // Create a temporary file to use with deno info
+      const tempFile = Deno.makeTempFileSync({ suffix: ".ts" });
+      Deno.writeTextFileSync(
+        tempFile,
+        `import {} from "${jsrSpecifier}";`,
+      );
+
+      // Run deno info and capture the output
+      const command = new Deno.Command("deno", {
+        args: ["info", tempFile, "--json"],
+      });
+      const output = command.outputSync();
+      Deno.removeSync(tempFile);
+
+      // Parse the JSON output
+      const info = JSON.parse(new TextDecoder().decode(output.stdout));
+
+      // Find the URL corresponding to the JSR module
+      const url = info.redirects[jsrSpecifier];
+      if (url) {
+        return url;
+      }
+      throw new Error(`Could not resolve JSR URL for ${jsrSpecifier}`);
+    } catch (error) {
+      console.error(`Error resolving JSR URL for ${jsrSpecifier}:`, error);
+      throw error;
+    }
+  }
+
+  private fetchAndAnalyzeRemoteModuleSync(url: string): Set<string> {
+    if (this.state.remoteModules.has(url)) {
+      return this.state.remoteModules.get(url)!.blockingFunctions;
+    }
+
+    try {
+      // Resolve JSR URLs to their actual URLs
+      const actualUrl = url.startsWith("jsr:")
+        ? this.resolveJsrUrlSync(url)
+        : url;
+
+      console.log(`Fetching module from ${actualUrl}`);
+      const content = this.fetchSync(actualUrl);
+
+      const moduleInfo: RemoteModuleInfo = {
+        url,
+        content,
+        blockingFunctions: new Set<string>(),
+      };
+
+      this.state.remoteModules.set(url, moduleInfo);
+
+      const sourceFile = ts.createSourceFile(
+        url,
+        content,
+        ts.ScriptTarget.Latest,
+        true,
+      );
+
+      const blockingFuncs = this.analyzeSourceFile(sourceFile, url, new Set());
+      moduleInfo.blockingFunctions = blockingFuncs;
+      return blockingFuncs;
+    } catch (error) {
+      console.error(`Error fetching remote module ${url}:`, error);
+      return new Set();
+    }
+  }
+
+  analyzeFileSync(filePath: string, visited = new Set<string>()): Set<string> {
+    const absolutePath = path.resolve(filePath);
+
+    if (visited.has(absolutePath)) {
+      return this.state.analyzedFiles.get(absolutePath) || new Set();
+    }
+
+    visited.add(absolutePath);
+
+    try {
+      const content = Deno.readTextFileSync(absolutePath);
+      const sourceFile = ts.createSourceFile(
+        absolutePath,
+        content,
+        ts.ScriptTarget.Latest,
+        true,
+      );
+
+      // First pass: collect and analyze imports
+      const analyzeImports = (node: ts.Node) => {
+        if (ts.isImportDeclaration(node)) {
+          const source = node.moduleSpecifier.getText().replace(/['"]/g, "");
+
+          if (source.startsWith("jsr:") || source.startsWith("npm:")) {
+            // Handle remote imports synchronously
+            const blockingFuncs = this.fetchAndAnalyzeRemoteModuleSync(source);
+            if (node.importClause?.namedBindings) {
+              if (ts.isNamedImports(node.importClause.namedBindings)) {
+                node.importClause.namedBindings.elements.forEach((element) => {
+                  const localName = element.name.text;
+                  const importedName = element.propertyName?.text ||
+                    element.name.text;
+                  this.state.importMap.set(localName, {
+                    source,
+                    name: importedName,
+                  });
+                  if (blockingFuncs.has(importedName)) {
+                    this.markAsBlocking(localName);
+                  }
+                });
+              }
+            }
+          } else if (source.startsWith(".")) {
+            const importPath = this.normalizeImportPath(source, absolutePath);
+            this.analyzeFileSync(importPath, visited);
+          }
+        }
+      };
+
+      ts.forEachChild(sourceFile, analyzeImports);
+
+      const blockingFuncs = this.analyzeSourceFile(
+        sourceFile,
+        absolutePath,
+        visited,
+      );
+      this.state.analyzedFiles.set(absolutePath, blockingFuncs);
+      return blockingFuncs;
+    } catch (error) {
+      console.error(`Error analyzing ${absolutePath}:`, error);
+      return new Set();
+    }
+  }
 }
 
 if (import.meta.main) {
@@ -278,7 +424,7 @@ if (import.meta.main) {
     Deno.exit(1);
   }
 
-  await analyzer.analyzeFile(filePath);
+  analyzer.analyzeFileSync(filePath);
 
   console.log("\nAnalysis Results:");
   console.log("----------------");
