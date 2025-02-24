@@ -7,7 +7,7 @@ const plugin: Deno.lint.Plugin = {
     "no-sync-in-async": {
       create(context) {
         const analyzer = new TypeScriptAnalyzer();
-        analyzer.analyzeFileSync(context.filename);
+        analyzer.analyzeFile(context.filename);
         const state = analyzer.getState();
 
         function findAsyncParent(node: any): string | undefined {
@@ -83,7 +83,6 @@ const plugin: Deno.lint.Plugin = {
                       : ""
                   }`,
               });
-              return;
             }
 
             // Check for method calls to known blocking functions
