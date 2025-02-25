@@ -48,6 +48,10 @@
 
 import { TypeScriptAnalyzer } from "./analyzer.ts";
 
+/**
+ * A Deno lint plugin that detects synchronous operations within async functions.
+ * The plugin analyzes code for potentially blocking operations that could affect performance.
+ */
 const plugin: Deno.lint.Plugin = {
   name: "sync-checker",
   rules: {
