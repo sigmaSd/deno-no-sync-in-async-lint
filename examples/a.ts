@@ -1,7 +1,7 @@
 import { blocking_b, wrap_blocking_c } from "./b.ts";
 
 export async function blocking() {
-  Deno.readTextFileSync("");
+  Deno.writeTextFileSync("hello.txt", "world");
   await new Promise((resolve) => setTimeout(resolve, 1000));
 }
 
