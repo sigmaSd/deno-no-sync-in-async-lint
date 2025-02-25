@@ -77,6 +77,10 @@ Uses static analysis to:
 - Track function definitions and locations
 - Detect sync operations in async contexts
 
+## TODO
+- Check how feasible it is to detect sync operations across remote imports
+  - I tested this already and it worked in a hacky way for jsr imports, npm imports are problematic though.
+
 ## License
 
 MIT License
