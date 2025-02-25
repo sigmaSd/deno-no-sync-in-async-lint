@@ -2,6 +2,8 @@
 
 Detects synchronous/blocking operations within async functions to prevent accidentally blocking the event loop.
 
+It analyzes functions across imports.
+
 ## Installation
 
 ```json

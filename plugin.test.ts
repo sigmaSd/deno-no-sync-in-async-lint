@@ -1,4 +1,4 @@
-import { assert, assertEquals } from "jsr:@std/assert@1.0.11";
+import { assertEquals } from "jsr:@std/assert@1.0.11";
 import Plugin from "./plugin.ts";
 
 Deno.test("no-sync-in-async", () => {

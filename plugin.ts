@@ -1,6 +1,8 @@
 /**
  * @module no-sync-in-async/plugin
  * @description A Deno lint plugin that detects synchronous operations within async functions.
+ * It analyzes functions across imports.
+ *
  * This includes:
  * - Calls to Deno.*Sync methods
  * - Calls to known blocking functions
