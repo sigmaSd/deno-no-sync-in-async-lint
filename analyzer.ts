@@ -67,7 +67,7 @@ export class TypeScriptAnalyzer {
   private analyzeSourceFile(
     sourceFile: ts.SourceFile,
     filePath: string,
-    visited: Set<string>,
+    _visited: Set<string>,
   ): Set<string> {
     const blockingFuncs = new Set<string>();
     let currentFunction: string | undefined;

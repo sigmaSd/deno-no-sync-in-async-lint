@@ -4,6 +4,9 @@ Detects synchronous/blocking operations within async functions to prevent accide
 
 It analyzes functions across imports.
 
+You should prefer running deno lint from the cli because of https://github.com/denoland/deno/issues/28258
+Lsp gives only limited lints
+
 ## Installation
 
 ```json

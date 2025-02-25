@@ -3,6 +3,9 @@
  * @description A Deno lint plugin that detects synchronous operations within async functions.
  * It analyzes functions across imports.
  *
+ * You should prefer running deno lint from the cli because of https://github.com/denoland/deno/issues/28258
+ * Lsp gives only limited lints
+ *
  * This includes:
  * - Calls to Deno.*Sync methods
  * - Calls to known blocking functions
