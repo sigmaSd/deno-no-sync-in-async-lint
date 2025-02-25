@@ -54,6 +54,7 @@
     "jsr:@std/toml@0.220.1": "0.220.1",
     "jsr:@std/yaml@*": "1.0.5",
     "npm:@typescript-eslint/parser@8.24.1": "8.24.1_eslint@9.21.0_typescript@5.7.2",
+    "npm:eslint@*": "9.21.0",
     "npm:typescript@5.7.2": "5.7.2"
   },
   "jsr": {
