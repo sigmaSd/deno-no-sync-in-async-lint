@@ -15,6 +15,7 @@
  * synchronous operations that could block the event loop when used in async contexts.
  *
  * @example
+ * ```ts
  * // Invalid examples - these will trigger lint errors:
  *
  * async function readFile() {
@@ -39,16 +40,7 @@
  *   const content = await Deno.readFile("file.txt"); // OK
  *   const data = await asyncOperation(); // OK
  * }
- *
- * @example
- * // Configuration in deno.json:
- * {
- *   "lint": {
- *     "plugins": [
- *        "jsr:@sigmasd/deno-no-sync-in-async-lint@0.5.0"
- *      ]
- *   }
- * }
+ * ```
  */
 
 import { TypeScriptAnalyzer } from "./analyzer.ts";

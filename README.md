@@ -13,7 +13,7 @@ Lsp gives only limited lints
 {
   "lint": {
     "plugins": [
-      "jsr:@sigmasd/deno-no-sync-in-async-lint@0.5.0"
+      "jsr:@sigmasd/deno-no-sync-in-async-lint@0.6.0"
     ]
   }
 }
