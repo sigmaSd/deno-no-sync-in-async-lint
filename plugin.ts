@@ -1,4 +1,51 @@
-// plugin.ts
+/**
+ * @module no-sync-in-async/plugin
+ * @description A Deno lint plugin that detects synchronous operations within async functions.
+ * This includes:
+ * - Calls to Deno.*Sync methods
+ * - Calls to known blocking functions
+ * - Method calls to known blocking functions
+ *
+ * The plugin analyzes TypeScript/JavaScript files to identify potentially problematic
+ * synchronous operations that could block the event loop when used in async contexts.
+ *
+ * @example
+ * // Invalid examples - these will trigger lint errors:
+ *
+ * async function readFile() {
+ *   // Error: Sync operation readFileSync found in async function readFile
+ *   const content = Deno.readFileSync("file.txt");
+ * }
+ *
+ * async function processData() {
+ *   // Error: Blocking function 'readFile' called in async function 'processData'
+ *   readFile();
+ * }
+ *
+ * // Valid examples - these are fine:
+ *
+ * // Synchronous functions using sync operations
+ * function normalFunction() {
+ *   const content = Deno.readFileSync("file.txt"); // OK
+ * }
+ *
+ * // Async functions using async operations
+ * async function goodExample() {
+ *   const content = await Deno.readFile("file.txt"); // OK
+ *   const data = await asyncOperation(); // OK
+ * }
+ *
+ * @example
+ * // Configuration in deno.json:
+ * {
+ *   "lint": {
+ *     "plugins": [
+ *        "jsr:@sigmasd/deno-no-sync-in-async-lint@0.5.0"
+ *      ]
+ *   }
+ * }
+ */
+
 import { TypeScriptAnalyzer } from "./analyzer.ts";
 
 const plugin: Deno.lint.Plugin = {
@@ -10,6 +57,8 @@ const plugin: Deno.lint.Plugin = {
         analyzer.analyzeFile(context.filename);
         const state = analyzer.getState();
 
+        // TODO: report upstream type issues
+        // deno-lint-ignore no-explicit-any
         function findAsyncParent(node: any): string | undefined {
           let current = node;
           while (current) {
@@ -48,7 +97,7 @@ const plugin: Deno.lint.Plugin = {
         }
 
         return {
-          CallExpression(node: any) {
+          CallExpression(node: Deno.lint.CallExpression) {
             const asyncFuncName = findAsyncParent(node);
             if (!asyncFuncName) return;
 
