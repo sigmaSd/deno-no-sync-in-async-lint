@@ -117,6 +117,17 @@ const plugin: Deno.lint.Plugin = {
                 node,
                 message:
                   `Sync operation ${node.callee.property.name} found in async function ${asyncFuncName}`,
+                fix(fixer) {
+                  console.log(node);
+                  const syncName = ((node.callee as Deno.lint.MemberExpression)
+                    .property as Deno.lint.PrivateIdentifier)
+                    .name;
+                  // deno-fmt-ignore
+                  const nodeArgs = node.arguments.map(arg => (arg as Deno.lint.Literal).raw).join(", ");
+                  // deno-fmt-ignore
+                  const asyncName = `await Deno.${syncName.replace("Sync", "")}(${nodeArgs})`;
+                  return fixer.replaceText(node, asyncName);
+                },
               });
               return;
             }
