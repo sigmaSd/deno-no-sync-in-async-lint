@@ -1,11 +1,12 @@
 # Deno No-Sync-in-Async Lint Plugin
 
-Detects synchronous/blocking operations within async functions to prevent accidentally blocking the event loop.
+Detects synchronous/blocking operations within async functions to prevent
+accidentally blocking the event loop.
 
 It analyzes functions across imports.
 
-You should prefer running deno lint from the cli because of https://github.com/denoland/deno/issues/28258
-Lsp gives only limited lints
+You should prefer running deno lint from the cli because of
+https://github.com/denoland/deno/issues/28258 Lsp gives only limited lints
 
 ## Installation
 
@@ -26,6 +27,7 @@ Lsp gives only limited lints
 The plugin automatically runs as part of `deno lint`, detecting:
 
 1. Deno sync operations:
+
 ```typescript
 async function readFile() {
   // Error: Sync operation readFileSync found in async function readFile
@@ -34,6 +36,7 @@ async function readFile() {
 ```
 
 2. Blocking function calls:
+
 ```typescript
 async function processData() {
   // Error: Blocking function 'readFile' called in async function 'processData'
@@ -42,6 +45,7 @@ async function processData() {
 ```
 
 Valid code:
+
 ```typescript
 // Sync operations in normal functions - OK
 function normalFunction() {
@@ -63,6 +67,7 @@ deno run analyzer.ts <file-path>
 ```
 
 Output example:
+
 ```
 Analyzing file.ts...
 Found blocking functions:
@@ -73,13 +78,16 @@ Found blocking functions:
 ## How it Works
 
 Uses static analysis to:
+
 - Identify blocking function patterns
 - Track function definitions and locations
 - Detect sync operations in async contexts
 
 ## TODO
+
 - Check how feasible it is to detect sync operations across remote imports
-  - I tested this already and it worked in a hacky way for jsr imports, npm imports are problematic though.
+  - I tested this already and it worked in a hacky way for jsr imports, npm
+    imports are problematic though.
 
 ## License
 
