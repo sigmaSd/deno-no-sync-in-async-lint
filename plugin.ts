@@ -118,7 +118,6 @@ const plugin: Deno.lint.Plugin = {
                 message:
                   `Sync operation ${node.callee.property.name} found in async function ${asyncFuncName}`,
                 fix(fixer) {
-                  console.log(node);
                   const syncName = ((node.callee as Deno.lint.MemberExpression)
                     .property as Deno.lint.PrivateIdentifier)
                     .name;
