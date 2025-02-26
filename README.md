@@ -5,6 +5,10 @@ accidentally blocking the event loop.
 
 It analyzes functions across imports.
 
+## Deprecated
+
+This plugins will stop working starting from deno 2.2.3 because deno lint won't accept permissions anymore.
+
 You should prefer running deno lint from the cli because of
 https://github.com/denoland/deno/issues/28258 Lsp gives only limited lints
 

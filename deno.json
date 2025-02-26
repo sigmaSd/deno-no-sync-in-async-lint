@@ -1,6 +1,6 @@
 {
   "name": "@sigmasd/deno-no-sync-in-async-lint",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "license": "MIT",
   "exports": {
     ".": "./plugin.ts"
